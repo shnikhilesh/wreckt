@@ -1,0 +1,12 @@
+{
+  "subject:fiction": 400,
+  "subject:fantasy": 200,
+  "subject:science fiction": 60,
+  "subject:mystery": 120,
+  "subject:romance": 180,
+  "subject:thriller": 0,
+  "subject:biography": 140,
+  "subject:history": 60,
+  "subject:self-help": 40,
+  "subject:literary fiction": 100
+}
