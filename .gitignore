@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# ingestion progress (local resume state)
+scripts/ingest-progress-ol.json
+scripts/ingest-progress.json
+
 # vercel
 .vercel
 

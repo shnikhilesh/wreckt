@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import dotenv from "dotenv";
+import { readFile, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -28,9 +29,21 @@ if (!SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const OPEN_LIBRARY_BASE =
-  "https://openlibrary.org/search.json?q=subject:fiction&sort=rating&limit=100";
-const TOTAL_PAGES = 50;
+const SUBJECTS = [
+  "fiction",
+  "fantasy",
+  "science_fiction",
+  "mystery",
+  "romance",
+  "thriller",
+  "biography",
+  "history",
+  "self_help",
+  "literary_fiction",
+];
+
+const TARGET = 5000;
+const PAGE_SIZE = 100;
 const BATCH_SIZE = 100;
 const PAGE_DELAY_MS = 1000;
 
@@ -70,33 +83,6 @@ function mapBook(doc) {
   };
 }
 
-async function fetchPage(page) {
-  const url = `${OPEN_LIBRARY_BASE}&page=${page}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for page ${page}`);
-  }
-
-  const data = await response.json();
-  return data.docs ?? [];
-}
-
-async function getExistingWorkKeys(keys) {
-  if (keys.length === 0) return new Set();
-
-  const { data, error } = await supabase
-    .from("works")
-    .select("ol_work_key")
-    .in("ol_work_key", keys);
-
-  if (error) {
-    throw new Error(`Failed to check existing works: ${error.message}`);
-  }
-
-  return new Set(data.map((row) => row.ol_work_key));
-}
-
 async function insertBatch(batch) {
   const { error } = await supabase
     .from("works")
@@ -125,75 +111,132 @@ function dedupeAndFilter(mappedBooks, existingKeys) {
   return { toInsert, skipped };
 }
 
-async function processPage(page, errors) {
-  const docs = await fetchPage(page);
-  const fetched = docs.length;
+async function loadAllExistingKeys() {
+  const { data: existing, error } = await supabase
+    .from("works")
+    .select("ol_work_key");
 
-  const mapped = docs.map(mapBook).filter(Boolean);
-  const keys = mapped.map((b) => b.ol_work_key);
-
-  let existingKeys;
-  try {
-    existingKeys = await getExistingWorkKeys(keys);
-  } catch (err) {
-    errors.push({ page, message: err.message });
-    console.error(`Page ${page}: ${err.message}`);
-    return { fetched, inserted: 0, skipped: 0 };
+  if (error) {
+    throw new Error(`Failed to load existing works: ${error.message}`);
   }
 
-  const { toInsert, skipped } = dedupeAndFilter(mapped, existingKeys);
+  return new Set(
+    (existing ?? []).map((r) => r.ol_work_key).filter(Boolean),
+  );
+}
 
-  let inserted = 0;
-
-  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-    const batch = toInsert.slice(i, i + BATCH_SIZE);
-
-    try {
-      await insertBatch(batch);
-      inserted += batch.length;
-    } catch (err) {
-      errors.push({
-        page,
-        batch: Math.floor(i / BATCH_SIZE) + 1,
-        message: err.message,
-      });
-      console.error(
-        `Page ${page}, batch ${Math.floor(i / BATCH_SIZE) + 1}: ${err.message}`,
-      );
-    }
-  }
-
-  return { fetched, inserted, skipped };
+function buildSubjectUrl(subject, offset) {
+  return `https://openlibrary.org/search.json?subject=${subject}&fields=key,title,author_name,first_publish_year,subject,cover_i,first_sentence&limit=${PAGE_SIZE}&offset=${offset}`;
 }
 
 async function main() {
   console.log("Starting Wreckt Open Library ingestion…");
-  console.log(`Fetching ${TOTAL_PAGES} pages (${TOTAL_PAGES * 100} books max)\n`);
+  console.log(`Target: ${TARGET} inserted books across ${SUBJECTS.length} subjects\n`);
+
+  const progressPath = join(__dirname, "ingest-progress-ol.json");
+  let progress = {};
+
+  try {
+    const raw = await readFile(progressPath, "utf8");
+    progress = JSON.parse(raw);
+  } catch {
+    progress = {};
+  }
+
+  const existingKeys = await loadAllExistingKeys();
+  console.log(`Loaded ${existingKeys.size} existing works from DB\n`);
 
   let totalFetched = 0;
   let totalInserted = 0;
   let totalSkipped = 0;
   const errors = [];
 
-  for (let page = 1; page <= TOTAL_PAGES; page++) {
-    try {
-      const { fetched, inserted, skipped } = await processPage(page, errors);
+  for (const subject of SUBJECTS) {
+    if (totalInserted >= TARGET) break;
 
-      totalFetched += fetched;
-      totalInserted += inserted;
-      totalSkipped += skipped;
+    let offset = progress[subject] ?? 0;
+    let keepGoing = true;
 
-      console.log(
-        `Page ${page}: fetched ${fetched} books, inserted ${inserted}, skipped ${skipped} duplicates`,
-      );
-    } catch (err) {
-      errors.push({ page, message: err.message });
-      console.error(`Page ${page}: ${err.message}`);
+    while (keepGoing && totalInserted < TARGET) {
+      const pageNum = Math.floor(offset / PAGE_SIZE) + 1;
+      const url = buildSubjectUrl(subject, offset);
+
+      try {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          throw new Error(
+            `HTTP ${response.status} for subject "${subject}" at offset ${offset}`,
+          );
+        }
+
+        const data = await response.json();
+        const results = data.docs ?? [];
+        const fetched = results.length;
+        totalFetched += fetched;
+
+        if (fetched === 0) keepGoing = false;
+        if (fetched < PAGE_SIZE) keepGoing = false;
+
+        const mapped = results.map(mapBook).filter(Boolean);
+        const { toInsert, skipped } = dedupeAndFilter(mapped, existingKeys);
+
+        let inserted = 0;
+
+        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+          const batch = toInsert.slice(i, i + BATCH_SIZE);
+
+          try {
+            await insertBatch(batch);
+            inserted += batch.length;
+
+            for (const book of batch) {
+              existingKeys.add(book.ol_work_key);
+            }
+          } catch (err) {
+            errors.push({
+              subject,
+              page: pageNum,
+              offset,
+              batch: Math.floor(i / BATCH_SIZE) + 1,
+              message: err.message,
+            });
+            console.error(
+              `[ol] Subject '${subject}' page ${pageNum} (offset ${offset}), batch ${Math.floor(i / BATCH_SIZE) + 1}: ${err.message}`,
+            );
+          }
+        }
+
+        totalInserted += inserted;
+        totalSkipped += skipped;
+
+        console.log(
+          `[ol] Subject '${subject}' page ${pageNum} (offset ${offset}): fetched ${fetched}, inserted ${inserted}, skipped ${skipped} | Total inserted: ${totalInserted}`,
+        );
+
+        const newOffset = offset + PAGE_SIZE;
+        progress[subject] = newOffset;
+        await writeFile(progressPath, JSON.stringify(progress, null, 2) + "\n");
+        offset = newOffset;
+
+        if (totalInserted >= TARGET) {
+          console.log("Target reached");
+          break;
+        }
+
+        if (keepGoing) {
+          await sleep(PAGE_DELAY_MS);
+        }
+      } catch (err) {
+        errors.push({ subject, page: pageNum, offset, message: err.message });
+        console.error(
+          `[ol] Subject '${subject}' page ${pageNum} (offset ${offset}): ${err.message}`,
+        );
+        keepGoing = false;
+      }
     }
 
-    if (page < TOTAL_PAGES) {
-      await sleep(PAGE_DELAY_MS);
-    }
+    if (totalInserted >= TARGET) break;
   }
 
   console.log("\n─── Ingestion complete ───");
@@ -205,8 +248,8 @@ async function main() {
     console.log(`Errors:         ${errors.length}`);
     for (const err of errors) {
       const location = err.batch
-        ? `page ${err.page}, batch ${err.batch}`
-        : `page ${err.page}`;
+        ? `subject '${err.subject}' page ${err.page} (offset ${err.offset}), batch ${err.batch}`
+        : `subject '${err.subject}' page ${err.page} (offset ${err.offset})`;
       console.log(`  - ${location}: ${err.message}`);
     }
   } else {

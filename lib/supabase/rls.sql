@@ -165,13 +165,14 @@ create policy "users can delete their own takes"
 
 
 -- ─── LISTS ───────────────────────────────────────────────
--- Users read and write only their own lists.
+-- Public read — Logs are publicly viewable. Users write only their own lists.
 
 drop policy if exists "users can read their own lists" on lists;
-create policy "users can read their own lists"
+drop policy if exists "lists are publicly readable" on lists;
+create policy "lists are publicly readable"
   on lists for select
-  to authenticated
-  using (auth.uid() = user_id);
+  to anon, authenticated
+  using (true);
 
 drop policy if exists "users can create their own lists" on lists;
 create policy "users can create their own lists"
@@ -194,20 +195,14 @@ create policy "users can delete their own lists"
 
 
 -- ─── LIST_ENTRIES ────────────────────────────────────────
--- Users read and write entries only in lists they own.
+-- Public read — Logs are publicly viewable. Users write only entries in lists they own.
 
 drop policy if exists "users can read entries in their own lists" on list_entries;
-create policy "users can read entries in their own lists"
+drop policy if exists "list entries are publicly readable" on list_entries;
+create policy "list entries are publicly readable"
   on list_entries for select
-  to authenticated
-  using (
-    exists (
-      select 1
-      from lists
-      where lists.id = list_entries.list_id
-        and lists.user_id = auth.uid()
-    )
-  );
+  to anon, authenticated
+  using (true);
 
 drop policy if exists "users can add entries to their own lists" on list_entries;
 create policy "users can add entries to their own lists"
