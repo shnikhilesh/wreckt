@@ -1,3 +1,4 @@
+import { AddToListButton } from "@/components/AddToListButton";
 import { RatingWidget } from "@/components/RatingWidget";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -126,6 +127,8 @@ export default async function BookDetailPage({
         </div>
 
         <RatingWidget workId={id} />
+
+        <AddToListButton workId={id} />
 
         {/* Description */}
         <section className="mt-10">

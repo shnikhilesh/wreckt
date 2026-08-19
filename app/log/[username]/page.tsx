@@ -1,8 +1,14 @@
+import { BookCard, type BookCardWork } from "@/components/BookCard";
 import { EditLogButton } from "@/components/EditLogButton";
+import {
+  LIST_EMPTY_MESSAGES,
+  LIST_ORDER,
+  slugifyListName,
+  type ListName,
+} from "@/lib/lists";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
-const LIST_ORDER = ["Stack", "Reading now", "Finished", "Dropped"] as const;
 const COVERS_PER_LIST = 10;
 
 type Profile = {
@@ -11,16 +17,10 @@ type Profile = {
   created_at: string;
 };
 
-type Work = {
-  id: string;
-  title: string;
-  cover_url: string | null;
-};
-
 type ListSection = {
   id: string;
-  name: string;
-  entries: { work_id: string; added_at: string; works: Work | null }[];
+  name: ListName;
+  entries: { work_id: string; added_at: string; works: BookCardWork | null }[];
   total: number;
 };
 
@@ -33,10 +33,6 @@ type Take = {
   score: number | null;
 };
 
-function bookInitials(title: string) {
-  return title.trim().slice(0, 2).toUpperCase();
-}
-
 async function loadListSections(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -48,14 +44,16 @@ async function loadListSections(
 
   const orderedLists = LIST_ORDER.map((name) =>
     listsRaw?.find((list) => list.name === name),
-  ).filter((list): list is { id: string; name: string } => Boolean(list));
+  ).filter((list): list is { id: string; name: ListName } => Boolean(list));
 
   return Promise.all(
     orderedLists.map(async (list) => {
       const [{ data: entries }, { count }] = await Promise.all([
         supabase
           .from("list_entries")
-          .select("work_id, added_at, works(id, title, cover_url)")
+          .select(
+            "work_id, added_at, works(id, title, author_name, cover_url, cached_rating)",
+          )
           .eq("list_id", list.id)
           .order("added_at", { ascending: false })
           .limit(COVERS_PER_LIST),
@@ -165,39 +163,34 @@ export default async function LogPage({
             <section key={list.id}>
               <div className="flex items-baseline justify-between">
                 <h2 className="text-lg font-semibold text-white">
-                  {list.name}
+                  {list.name}{" "}
+                  <span className="font-normal text-zinc-500">
+                    ({list.total})
+                  </span>
                 </h2>
                 {list.total > COVERS_PER_LIST && (
-                  <span className="text-sm text-zinc-500">See all →</span>
+                  <Link
+                    href={`/log/${profile.username}/lists/${slugifyListName(list.name)}`}
+                    className="text-sm text-zinc-500 transition-colors hover:text-white"
+                  >
+                    See all →
+                  </Link>
                 )}
               </div>
 
               {list.entries.length === 0 ? (
-                <p className="mt-3 text-sm text-zinc-500">Nothing here yet</p>
+                <p className="mt-3 text-sm text-zinc-500">
+                  {LIST_EMPTY_MESSAGES[list.name]}
+                </p>
               ) : (
-                <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
+                <div className="mt-3 flex gap-4 overflow-x-auto pb-2">
                   {list.entries.map((entry) =>
                     entry.works ? (
-                      <Link
+                      <BookCard
                         key={entry.work_id}
-                        href={`/books/${entry.works.id}`}
-                        className="w-20 shrink-0 transition-transform duration-200 hover:scale-[1.03]"
-                      >
-                        <div className="aspect-[2/3] overflow-hidden rounded-md bg-zinc-800 shadow-md">
-                          {entry.works.cover_url ? (
-                            <img
-                              src={`/api/cover?url=${encodeURIComponent(entry.works.cover_url)}`}
-                              alt={entry.works.title}
-                              loading="lazy"
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center bg-zinc-800 text-sm font-semibold text-zinc-500">
-                              {bookInitials(entry.works.title)}
-                            </div>
-                          )}
-                        </div>
-                      </Link>
+                        work={entry.works}
+                        compact
+                      />
                     ) : null,
                   )}
                 </div>

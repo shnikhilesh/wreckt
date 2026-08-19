@@ -1,7 +1,7 @@
 "use client";
 
+import { BookCard } from "@/components/BookCard";
 import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 const PAGE_SIZE = 24;
@@ -33,17 +33,6 @@ type Work = {
   created_at: string;
 };
 
-function bookInitials(title: string, author: string) {
-  const t = title.trim()[0] ?? "";
-  const a = author.trim()[0] ?? "";
-  return (t + a).toUpperCase();
-}
-
-function formatRating(rating: number | null) {
-  if (rating == null) return null;
-  return Number(rating).toFixed(1);
-}
-
 function SkeletonGrid() {
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -56,48 +45,6 @@ function SkeletonGrid() {
         </div>
       ))}
     </div>
-  );
-}
-
-function BookCard({ book }: { book: Work }) {
-  const rating = formatRating(book.cached_rating);
-  const initials = bookInitials(book.title, book.author_name);
-
-  return (
-    <Link
-      href={`/books/${book.id}`}
-      className="group block transition-transform duration-200 hover:scale-[1.02]"
-    >
-      <div className="aspect-[2/3] overflow-hidden rounded-lg bg-zinc-800 shadow-md transition-shadow duration-200 group-hover:shadow-lg group-hover:shadow-black/40">
-        {book.cover_url ? (
-          <img
-            src={`/api/cover?url=${encodeURIComponent(book.cover_url)}`}
-            alt={book.title}
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-zinc-800 text-2xl font-semibold text-zinc-500">
-            {initials}
-          </div>
-        )}
-      </div>
-      <h3 className="mt-3 line-clamp-2 text-sm font-medium leading-snug text-white">
-        {book.title}
-      </h3>
-      <p className="mt-1 text-sm text-zinc-400">{book.author_name}</p>
-      <div className="mt-1 flex items-center gap-1 text-sm text-zinc-400">
-        {rating ? (
-          <>
-            <span className="text-amber-400">★</span>
-            <span className="text-zinc-300">{rating}</span>
-            <span>({book.rating_count})</span>
-          </>
-        ) : (
-          <span>No ratings yet</span>
-        )}
-      </div>
-    </Link>
   );
 }
 
@@ -257,7 +204,7 @@ export default function BooksPage() {
             <>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {books.map((book) => (
-                  <BookCard key={book.id} book={book} />
+                  <BookCard key={book.id} work={book} />
                 ))}
               </div>
 
