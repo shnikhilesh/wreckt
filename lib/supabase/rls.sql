@@ -11,6 +11,7 @@ alter table ratings      enable row level security;
 alter table takes        enable row level security;
 alter table lists        enable row level security;
 alter table list_entries enable row level security;
+alter table resonated_by enable row level security;
 
 
 -- ─── Trigger helpers (SECURITY DEFINER) ──────────────────
@@ -58,6 +59,23 @@ begin
     (new.id, 'Finished',     true),
     (new.id, 'Dropped',      true);
   return new;
+end;
+$$;
+
+create or replace function refresh_resonated_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update takes
+  set resonated_count = (
+    select count(*) from resonated_by
+    where take_id = coalesce(new.take_id, old.take_id)
+  )
+  where id = coalesce(new.take_id, old.take_id);
+  return coalesce(new, old);
 end;
 $$;
 
@@ -250,3 +268,26 @@ create policy "users can remove entries from their own lists"
         and lists.user_id = auth.uid()
     )
   );
+
+
+-- ─── RESONATED_BY ────────────────────────────────────────
+-- Public read (so resonated counts/state can be shown to anyone).
+-- Users can only resonate or un-resonate as themselves.
+
+drop policy if exists "resonated_by is publicly readable" on resonated_by;
+create policy "resonated_by is publicly readable"
+  on resonated_by for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "users can resonate as themselves" on resonated_by;
+create policy "users can resonate as themselves"
+  on resonated_by for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "users can remove their own resonation" on resonated_by;
+create policy "users can remove their own resonation"
+  on resonated_by for delete
+  to authenticated
+  using (auth.uid() = user_id);

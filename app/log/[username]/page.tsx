@@ -24,14 +24,23 @@ type ListSection = {
   total: number;
 };
 
-type Take = {
+type RecentTake = {
   id: string;
   body: string;
+  resonated_count: number;
   created_at: string;
   work_id: string;
-  works: { id: string; title: string } | null;
-  score: number | null;
+  works: { id: string; title: string; cover_url: string | null } | null;
 };
+
+function truncate(text: string, max: number) {
+  if (text.length <= max) return text;
+  return text.slice(0, max).trimEnd() + "…";
+}
+
+function bookInitials(title: string) {
+  return title.trim().slice(0, 2).toUpperCase();
+}
 
 async function loadListSections(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -75,32 +84,28 @@ async function loadListSections(
 async function loadRecentTakes(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-): Promise<Take[]> {
-  const { data: takesRaw } = await supabase
-    .from("takes")
-    .select("id, body, created_at, work_id, works(id, title)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(3);
+): Promise<{ takes: RecentTake[]; total: number }> {
+  const [{ data: takesRaw }, { count }] = await Promise.all([
+    supabase
+      .from("takes")
+      .select(
+        "id, body, resonated_count, created_at, work_id, works(id, title, cover_url)",
+      )
+      .eq("user_id", userId)
+      .eq("is_flagged", false)
+      .order("created_at", { ascending: false })
+      .limit(3),
+    supabase
+      .from("takes")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("is_flagged", false),
+  ]);
 
-  const takes = (takesRaw ?? []) as unknown as Omit<Take, "score">[];
-  if (takes.length === 0) return [];
-
-  const workIds = takes.map((take) => take.work_id);
-  const { data: ratings } = await supabase
-    .from("ratings")
-    .select("work_id, score")
-    .eq("user_id", userId)
-    .in("work_id", workIds);
-
-  const scoreByWorkId = new Map(
-    (ratings ?? []).map((rating) => [rating.work_id, rating.score]),
-  );
-
-  return takes.map((take) => ({
-    ...take,
-    score: scoreByWorkId.get(take.work_id) ?? null,
-  }));
+  return {
+    takes: (takesRaw ?? []) as unknown as RecentTake[],
+    total: count ?? 0,
+  };
 }
 
 export default async function LogPage({
@@ -131,7 +136,7 @@ export default async function LogPage({
     );
   }
 
-  const [lists, takes] = await Promise.all([
+  const [lists, { takes, total: totalTakes }] = await Promise.all([
     loadListSections(supabase, profile.id),
     loadRecentTakes(supabase, profile.id),
   ]);
@@ -201,37 +206,63 @@ export default async function LogPage({
 
         {/* Recent takes */}
         <section className="mt-10">
-          <h2 className="text-lg font-semibold text-white">Recent takes</h2>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold text-white">Recent takes</h2>
+            {totalTakes > 3 && (
+              <Link
+                href={`/log/${profile.username}/takes`}
+                className="text-sm text-zinc-500 transition-colors hover:text-white"
+              >
+                See all takes →
+              </Link>
+            )}
+          </div>
+
           {takes.length === 0 ? (
             <p className="mt-3 text-sm text-zinc-500">No takes yet</p>
           ) : (
-            <div className="mt-3 space-y-4">
+            <div className="mt-3 space-y-3">
               {takes.map((take) => (
                 <div
                   key={take.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
+                  className="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-3"
                 >
-                  <div className="flex items-center justify-between gap-4">
-                    {take.works ? (
+                  <Link
+                    href={`/books/${take.work_id}`}
+                    className="w-12 shrink-0"
+                  >
+                    <div className="aspect-[2/3] overflow-hidden rounded bg-zinc-800">
+                      {take.works?.cover_url ? (
+                        <img
+                          src={`/api/cover?url=${encodeURIComponent(take.works.cover_url)}`}
+                          alt={take.works.title}
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-zinc-500">
+                          {take.works ? bookInitials(take.works.title) : ""}
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+
+                  <div className="min-w-0 flex-1">
+                    {take.works && (
                       <Link
-                        href={`/books/${take.works.id}`}
+                        href={`/books/${take.work_id}`}
                         className="text-sm font-medium text-white transition-colors hover:text-zinc-300"
                       >
                         {take.works.title}
                       </Link>
-                    ) : (
-                      <span className="text-sm font-medium text-white" />
                     )}
-                    {take.score != null && (
-                      <span className="shrink-0 text-sm text-zinc-400">
-                        <span className="text-amber-400">★</span>{" "}
-                        {take.score}
-                      </span>
-                    )}
+                    <p className="mt-1 text-sm leading-relaxed text-zinc-400">
+                      {truncate(take.body, 100)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      ♥ {take.resonated_count} resonated
+                    </p>
                   </div>
-                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                    {take.body}
-                  </p>
                 </div>
               ))}
             </div>

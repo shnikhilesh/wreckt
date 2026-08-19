@@ -163,3 +163,38 @@ $$;
 create trigger trg_default_lists
 after insert on users
 for each row execute function create_default_lists();
+
+
+-- ─── RESONATED_BY ────────────────────────────────────────
+-- Tracks which users have resonated with which takes.
+-- "Resonated" is Wreckt's take-acknowledgement — not a like/upvote.
+create table resonated_by (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references users(id) on delete cascade,
+  take_id     uuid not null references takes(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  unique (user_id, take_id)   -- one resonation per user per take
+);
+
+create index on resonated_by (take_id);
+create index on resonated_by (user_id);
+
+-- Keep takes.resonated_count in sync — same pattern as refresh_cached_rating
+-- above. The client never writes resonated_count directly; it only writes
+-- to resonated_by, which only its own owner can write to under RLS.
+create or replace function refresh_resonated_count()
+returns trigger language plpgsql as $$
+begin
+  update takes
+  set resonated_count = (
+    select count(*) from resonated_by
+    where take_id = coalesce(new.take_id, old.take_id)
+  )
+  where id = coalesce(new.take_id, old.take_id);
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_resonated_count
+after insert or delete on resonated_by
+for each row execute function refresh_resonated_count();

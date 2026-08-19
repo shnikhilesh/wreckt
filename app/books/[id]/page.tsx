@@ -1,5 +1,6 @@
 import { AddToListButton } from "@/components/AddToListButton";
 import { RatingWidget } from "@/components/RatingWidget";
+import { TakesSection } from "@/components/TakesSection";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -138,11 +139,7 @@ export default async function BookDetailPage({
           </p>
         </section>
 
-        {/* Takes placeholder */}
-        <section className="mt-10">
-          <h2 className="text-lg font-semibold text-white">Takes</h2>
-          <p className="mt-3 text-sm text-zinc-400">Takes coming soon.</p>
-        </section>
+        <TakesSection workId={id} />
       </div>
     </main>
   );
