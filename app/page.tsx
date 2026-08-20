@@ -15,9 +15,9 @@ type SocialTake = {
 };
 
 const PROBLEM_STATEMENTS = [
-  { icon: "🛒", text: "Goodreads is owned by Amazon." },
-  { icon: "🕰️", text: "Its last major update was in 2013." },
-  { icon: "✨", text: "You deserve better." },
+  { icon: "📚", text: "Your reading list is a graveyard." },
+  { icon: "🕰️", text: "The apps you use were built for someone else." },
+  { icon: "✨", text: "You deserve something that gets it." },
 ];
 
 const FEATURES = [
