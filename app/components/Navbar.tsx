@@ -9,9 +9,23 @@ import { useEffect, useState } from "react";
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
+  const isLanding = pathname === "/";
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    // Only the landing page floats a transparent navbar over its hero;
+    // every other page keeps the plain solid bar, so skip the listener
+    // there entirely.
+    if (!isLanding) return;
+
+    const handleScroll = () => setScrolled(window.scrollY > 40);
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [isLanding]);
 
   useEffect(() => {
     // Reactively update on sign-in/sign-out/token refresh, including
@@ -70,8 +84,16 @@ export function Navbar() {
     router.refresh();
   };
 
+  const headerClassName = isLanding
+    ? `fixed inset-x-0 top-0 z-50 border-b transition-colors duration-300 ${
+        scrolled
+          ? "border-zinc-800 bg-zinc-950/90 backdrop-blur-sm"
+          : "border-transparent bg-transparent"
+      }`
+    : "sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-sm";
+
   return (
-    <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
+    <header className={headerClassName}>
       <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <Link
           href="/"
